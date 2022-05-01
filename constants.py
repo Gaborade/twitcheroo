@@ -1,4 +1,6 @@
-SUPPORTED_SCOPES: set = (
+from typing import Tuple
+
+SUPPORTED_SCOPES: Tuple[str] = (
     "analytics:read:extensions",
     "analytics:read:games",
     "bits:read",
@@ -34,7 +36,7 @@ SUPPORTED_SCOPES: set = (
     "user:read:subscriptions"
 )
 
-APIv5_SCOPES: set = (
+APIv5_SCOPES: Tuple[str] = (
     "channel_subscriptions",
     "channel_commercial",
     "channel_editor",

@@ -2,7 +2,19 @@ class TwitchException(Exception):
     pass
 
 
-class TwitchClientCredentialsException(TwitchException):
+class ScopeError(Exception):
+    pass
+
+
+class InvalidRequestException(Exception):
+    pass
+
+
+class TwitchAuthException(Exception):
+    pass
+
+
+class TwitchClientCredentialsException(TwitchAuthException):
     
     def __init__(self, message, reason):
         super(TwitchClientCredentialsError, self).__init__()
