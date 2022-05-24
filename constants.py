@@ -33,7 +33,7 @@ SUPPORTED_SCOPES: Tuple[str] = (
     "user:read:broadcast",
     "user:read:email",
     "user:read:follows",
-    "user:read:subscriptions"
+    "user:read:subscriptions",
 )
 
 APIv5_SCOPES: Tuple[str] = (
@@ -50,6 +50,5 @@ APIv5_SCOPES: Tuple[str] = (
     "chat:edit",
     "chat:read",
     "whisper:read",
-    "whispers:edit"
+    "whispers:edit",
 )
-

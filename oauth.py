@@ -2,7 +2,6 @@ from authlib.integrations.requests_client import OAuth2Session
 from authlib.common.urls import add_params_to_uri
 from constants import SUPPORTED_SCOPES, APIv5_SCOPES
 from typing import List, Optional
-import requests
 import warnings
 import os
 import time
@@ -20,7 +19,7 @@ class ClientCredentials:
         self,
         client_id: str,
         client_secret: str,
-        scopes: Optional[List[str]] = None,
+        scope: Optional[List[str]] = None,
         grant_type: str = "client_credentials",
     ):
 
@@ -29,52 +28,51 @@ class ClientCredentials:
         assert isinstance(client_secret, str), "Client secret should be a string"
         self.__client_secret = client_secret
 
-        if scopes:
-            assert isinstance(scopes, list), "Scope should be a list data type"
-            self._parse_scope_for_errors(scopes)
-            self.scopes = " ".join(scope for scope in scopes)
+        if scope is not None:
+            assert isinstance(scope, list), "Scope should be a list data type"
+            self._parse_scope_for_errors(scope)
+            self.scope = " ".join(i for i in scope)
         else:
-            # or self.scopes = "" so no errors will occur when client.py checks for scopes
-            # if scope is None, checking for scopes will produce errors since None is
-            # not an iterable
-            self.scopes = None
+            self.scope = ""
 
         self.grant_type = grant_type
         self.access_token = None
-        if self.scopes is not None:
+        if len(self.scope) > 0:
+            self.session = OAuth2Session(
+                self.__client_id, self.__client_secret, scope=self.scope
+            )
+        else:
             self.session = OAuth2Session(self.__client_id, self.__client_secret)
-        self.session = OAuth2Session(
-            self.__client_id, self.__client_secret, self.scopes
-        )
-        self.access_token_file = None
+        self.access_token_file = ".client_credentials.pickle"
         self.next_validate_token_time = 0
 
     @staticmethod
-    def _parse_scope_for_errors(twitch_scopes):
-        if len(twitch_scopes) == 1:
+    def _parse_scope_for_errors(twitch_scope):
+        if len(twitch_scope) == 1:
             if (
-                twitch_scopes[0] not in SUPPORTED_SCOPES
-                and twitch_scopes[0] not in APIv5_SCOPES
+                twitch_scope[0] not in SUPPORTED_SCOPES
+                and twitch_scope[0] not in APIv5_SCOPES
             ):
                 raise ValueError(
-                    f"Scope provided <{scopes[0]}> not supported by Twitch"
+                    f"Scope provided <{twitch_scope[0]}> not supported by Twitch"
                 )
-            if twitch_scopes[0] in APIv5_SCOPES:
+            if twitch_scope[0] in APIv5_SCOPES:
                 warnings.warn(
-                    f"""Scope provided <{twitch_scopes[0]}> is for Twitch legacy APIv5, 
-                recommeneded to switch to new API version """
+                    f"""Scope provided <{twitch_scope[0]}> is for Twitch 
+                    legacy APIv5, recommended to switch to new API version """
                 )
             return
         else:
             scope_in_apiv5 = []
-            for x in twitch_scopes:
+            for x in twitch_scope:
                 if x not in SUPPORTED_SCOPES and x not in APIv5_SCOPES:
                     raise ValueError(f"Scope provided <{x}> not supported by Twitch")
                 if x in APIv5_SCOPES:
                     scope_in_apiv5.append(x)
             if scope_in_apiv5:
                 warnings.warn(
-                    f"""Scopes provided {scope_in_apiv5} are for Twitch legacy APIv5, recommended to switch to 
+                    f"""Scope/s provided {scope_in_apiv5} are for Twitch 
+                    legacy APIv5, recommended to switch to 
                     new API version """
                 )
             return
@@ -100,7 +98,7 @@ class ClientCredentials:
     def __call__(self):
         if self.access_token is None:
             self.get_access_token()
-        if not self.token_is_validated():
+        if not self.is_token_validated():
             self.get_access_token(check_cache=False)
         if self.is_token_expired():
             self.get_access_token(check_cache=False)
@@ -109,18 +107,19 @@ class ClientCredentials:
     def _generate_twitch_token_url(self):
 
         """
-        Twitch requires adding the cilent_id and client_url when sending POST request to obtain access tokens
+        Twitch requires adding the cilent_id and client_url when
+        sending POST request to obtain access tokens
         during the usage of the client credentials OAuth flow
         """
 
-        if self.scopes is not None:
+        if len(self.scope) > 0:
             twitch_token_url = add_params_to_uri(
                 self.TWITCH_OAUTH_TOKEN_URL,
                 [
                     ("client_id", self.__client_id),
                     ("client_secret", self.__client_secret),
                     ("grant_type", self.grant_type),
-                    ("scope", self.scopes),
+                    ("scope", self.scope),
                 ],
             )
         else:
@@ -132,30 +131,23 @@ class ClientCredentials:
                     ("grant_type", self.grant_type),
                 ],
             )
-
+        print("twitch_token_url", twitch_token_url)
         return twitch_token_url
 
     def get_access_token(self, check_cache=True):
-        get_token_loop = True
-        while get_token_loop:
-            if check_cache and self.read_access_token() is not None:
-                saved_access_token = self.read_access_token()
-                # check pickle for corruption
-                if not isinstance(saved_access_token, dict):
-                    check_cache = False
-                else:
-                    self.access_token = saved_access_token
-                    get_token_loop = False
-            else:
-                twitch_token_url = self._generate_token_url()
-                self.access_token = self.session.fetch_token(twitch_token_url)
-                self.save_access_token(self.access_token)
-                get_token_loop = False
-        if self.scopes is not None:
+        # self.read_access_token() is called twice, needs changing
+        if check_cache and self.read_access_token_from_file() is not None:
+            self.access_token = self.read_access_token_from_file()
+        else:
+            twitch_token_url = self._generate_twitch_token_url()
+            self.access_token = self.session.fetch_token(twitch_token_url)
+            self.save_access_token_to_file()
+        print("get_access_token success", self.access_token)
+        if len(self.scope) > 0:
             self.session = OAuth2Session(
                 self.__client_id,
                 self.__client_secret,
-                self.scopes,
+                scope=self.scope,
                 token=self.access_token,
             )
         else:
@@ -182,8 +174,10 @@ class ClientCredentials:
             if response.status_code == 200:
                 # the next validation will be in the next hour ie 3600 seconds later
                 self.next_validate_token_time = time.time() + 3600
+                print("token truly validated", response.json())
                 return True
             elif response.status_code == 401:
+                print("token validation unsuccessful, change course of plans")
                 self.next_validate_token_time = 0
                 return False
         else:
@@ -192,43 +186,50 @@ class ClientCredentials:
     def is_token_expired(self):
         "App access tokens expire after 60 days"
         if time.time() > self.access_token["expires_at"]:
+            print("token has expired")
             return True
+        print("token has not expired, i repeat token has not expired")
         return False
 
-    def save_access_token(self):
-        if self.access_token is None:
-            return
-        with open(".client_credentials.pickle", "wb") as client_credentials_file:
+    def save_access_token_to_file(self):
+        with open(self.access_token_file, "wb") as client_credentials_file:
             pickle.dump(
-                self.access_token, client_credentials_file, pickle.HIGHEST_PRIORITY
+                self.access_token, client_credentials_file, pickle.HIGHEST_PROTOCOL
             )
+            print("token stored in cache")
 
     def read_access_token_from_file(self):
         try:
-            with open(".client_credentials.pickle", "rb") as client_credentials_file:
-                data = pickle.load(client_credentials_file)
+            with open(self.access_token_file, "rb") as client_credentials_file:
+                access_token = pickle.load(client_credentials_file)
         except FileNotFoundError:
             return None
         else:
-            # if pickle is corrupted, return a string instead of a dict
-            # so i can run a typecheck in get_access_token method
-            return data
+            # check for the unlikely event that pickle data gets corrupted
+            # pickle is insecure so it's quite important
+            # but then again not entirely necessary
+            if not isinstance(access_token, dict):
+                return None
+            token_keys = [
+                "token",
+                "expires_in",
+                "scope",
+                "token_type",
+                "bearer",
+                "expires_at",
+            ]
+            for key, value in access_token.items():
+                if key not in token_keys:
+                    return None
+            print("token read from pickle operation a success")
+            return access_token
 
 
-if __name__ == "__main__":
-    from dotenv import load_dotenv
+class AuthorizationCodeFlow:
+    def __init__(self):
+        pass
 
-    load_dotenv()
 
-    # user = ClientCredentials(
-    #  os.environ["CLIENT_ID"], os.environ["CLIENT_SECRET"], scope="bits:read"
-    # )
-    sec_user = ClientCredentials(
-        os.environ["CLIENT_ID"],
-        os.environ["CLIENT_SECRET"],
-        scope=["chat:read", "chat:edit"],
-    )
-    sec_user
-    # print(user.scope)
-    # print(user.get_access_token())
-    # print(user.is_token_validated())
+class OIDCAuthorizationCodeFlow:
+    def __init__(self):
+        pass
