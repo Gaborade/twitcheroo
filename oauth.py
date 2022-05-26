@@ -31,7 +31,7 @@ class ClientCredentials:
         if scope is not None:
             assert isinstance(scope, list), "Scope should be a list data type"
             self._parse_scope_for_errors(scope)
-            self.scope = " ".join(i for i in scope)
+            self.scope = " ".join(x for x in scope)
         else:
             self.scope = ""
 
@@ -102,7 +102,7 @@ class ClientCredentials:
             self.get_access_token(check_cache=False)
         if self.is_token_expired():
             self.get_access_token(check_cache=False)
-        return self.session
+        return self.session, self.scope.split()
 
     def _generate_twitch_token_url(self):
 
@@ -131,7 +131,6 @@ class ClientCredentials:
                     ("grant_type", self.grant_type),
                 ],
             )
-        print("twitch_token_url", twitch_token_url)
         return twitch_token_url
 
     def get_access_token(self, check_cache=True):
@@ -142,7 +141,6 @@ class ClientCredentials:
             twitch_token_url = self._generate_twitch_token_url()
             self.access_token = self.session.fetch_token(twitch_token_url)
             self.save_access_token_to_file()
-        print("get_access_token success", self.access_token)
         if len(self.scope) > 0:
             self.session = OAuth2Session(
                 self.__client_id,
@@ -174,10 +172,8 @@ class ClientCredentials:
             if response.status_code == 200:
                 # the next validation will be in the next hour ie 3600 seconds later
                 self.next_validate_token_time = time.time() + 3600
-                print("token truly validated", response.json())
                 return True
             elif response.status_code == 401:
-                print("token validation unsuccessful, change course of plans")
                 self.next_validate_token_time = 0
                 return False
         else:
@@ -185,10 +181,9 @@ class ClientCredentials:
 
     def is_token_expired(self):
         "App access tokens expire after 60 days"
+        
         if time.time() > self.access_token["expires_at"]:
-            print("token has expired")
             return True
-        print("token has not expired, i repeat token has not expired")
         return False
 
     def save_access_token_to_file(self):
@@ -221,7 +216,6 @@ class ClientCredentials:
             for key, value in access_token.items():
                 if key not in token_keys:
                     return None
-            print("token read from pickle operation a success")
             return access_token
 
 
