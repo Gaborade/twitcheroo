@@ -1,5 +1,7 @@
 import sys
-from typing import Optional, Dict, Any, Union
+import requests
+from tenacity import retry
+from typing import Optional, Dict, Any, Union, List
 from oauth import ClientCredentials, AuthorizationCodeFlow, OIDCAuthorizationCodeFlow
 from exceptions import TwitchAuthException, InvalidRequestException
 from authlib.common.urls import add_params_to_uri
@@ -19,7 +21,7 @@ class Twitch:
         ):
             raise TwitchAuthException(
                 f"""Authentication class <{auth.__class__.__name__}> not supported by API.
-                 Use ClientCredentials, AuthorizationCodeFlow, OIDCAuthorizationCodeFlow 
+                 Use ClientCredentials, AuthorizationCodeFlow or OIDCAuthorizationCodeFlow 
                 authentication classes"""
             )
 
@@ -45,11 +47,12 @@ class Twitch:
     ):
         # reminder to always set one of these keyword parameters to True
         # for every Twitch endpoint method created.
-        assert_msg = """
-                      Either of oauth_token_required, app_access_token_required or 
-                      app_or_oauth_token_required kwargs should be set to True 
-                      for any Twitch endpoint method created.
-                      """
+        assert_msg = (
+            "One of oauth_token_required, app_access_token_required or "
+            "app_or_oauth_token_required kwargs should be set to True "
+            "for any Twitch endpoint method created."
+        )
+
         assert any(
             [
                 oauth_token_required,
@@ -84,22 +87,29 @@ class Twitch:
                     f"{self.TWITCH_API_BASE_URL}{endpoint} endpoint requires a jwt token"
                 )
 
-        fragments = []
-        for k, v in query_parameters.copy().items():
-            if isinstance(v, list):
-                pop_list = query_parameters.pop(k)
-                fragments += [(k, element) for element in pop_list]
-        build_url = [
-            (key, value) for key, value in query_parameters.items() if value is not None
-        ]
-        build_url += fragments
-        url = add_params_to_uri(self.TWITCH_API_BASE_URL + endpoint, build_url)
+        request_body = request_body if request_body is not None else {}
+        query_parameters = query_parameters if query_parameters else {}
+        if query_parameters:
+            fragments = []
+            for k, v in query_parameters.copy().items():
+                if isinstance(v, list):
+                    pop_list = query_parameters.pop(k)
+                    fragments += [(k, element) for element in pop_list]
+            build_url = [
+                (key, value)
+                for key, value in query_parameters.items()
+                if value is not None
+            ]
+            build_url += fragments
+            url = add_params_to_uri(self.TWITCH_API_BASE_URL + endpoint, build_url)
+        else:
+            url = self.TWITCH_API_BASE_URL + endpoint
 
         retries = self.max_retries
         # TODO: there should be backoffs and random jitters
         while retries > 0:
             try:
-                if request_body is not None:
+                if request_body:
                     response = self.twitch_session.request(
                         method, url, body=request_body
                     )
@@ -139,7 +149,7 @@ class Twitch:
 
         required_scope = "channel:edit:commercial"
         if required_scope not in self.twitch_scope:
-            raise ScopeError(f"<{required_scope}> scope required")
+            raise ScopeError(f"[{required_scope}] scope required")
 
         required_params = ["broadcaster_id", "length"]
         for i in required_params:
@@ -174,7 +184,7 @@ class Twitch:
 
         required_scope = "analytics:read:extensions"
         if required_scope not in self.twitch_scope:
-            raise ScopeError(f"<{required_scope}> scope required")
+            raise ScopeError(f"[{required_scope}] scope required")
 
         if started_at is not None or ended_at is not None:
             if not all([started_at, ended_at]):
@@ -213,7 +223,7 @@ class Twitch:
 
         required_scope = "analytics:read:games"
         if required_scope not in self.twitch_scope:
-            raise ScopeError(f"<{required_scope}> scope required")
+            raise ScopeError(f"[{required_scope}] scope required")
 
         if started_at is not None or ended_at is not None:
             if not all([started_at, ended_at]):
@@ -250,7 +260,7 @@ class Twitch:
 
         required_scope = "bits:read"
         if required_scope not in self.twitch_scope:
-            raise ScopeError(f"<{required_scope}> scope required")
+            raise ScopeError(f"[{required_scope}] scope required")
 
         return self.twitch_request(
             "get",
@@ -311,7 +321,7 @@ class Twitch:
         assert isinstance(data, dict), "data should be a dict type"
         required_scope = "channel:manage:broadcast"
         if required_scope not in self.twitch_scope:
-            raise ScopeError(f"<{required_scope}> scope required")
+            raise ScopeError(f"[{required_scope}] scope required")
 
         body_params = ["game_id", "broadcaster_language", "title", "delay"]
         request_body = {
@@ -333,7 +343,7 @@ class Twitch:
 
         required_scope = "channel:read:editors"
         if required_scope not in self.twitch_scope:
-            raise ScopeError(f"<{required_scope}> scope required")
+            raise ScopeError(f"[{required_scope}] scope required")
 
         return self.twitch_request(
             "get",
@@ -348,7 +358,7 @@ class Twitch:
         assert isinstance(data, dict), "data should be a dict type"
         required_scope = "channel:manage:redemptions"
         if required_scope not in self.twitch_scope:
-            raise ScopeError(f"<{required_scope}> scope required")
+            raise ScopeError(f"[{required_scope}] scope required")
 
         required_params = ["title", "cost"]
         optional_params = [
@@ -383,7 +393,7 @@ class Twitch:
 
         required_scope = "channel:manage:redemptions"
         if required_scope not in required_scope:
-            raise ScopeError(f"<{required_scope}> scope required")
+            raise ScopeError(f"[{required_scope}] scope required")
 
         return self.twitch_request(
             "delete",
@@ -406,7 +416,7 @@ class Twitch:
 
         required_scope = "channel:read:redemptions"
         if required_scope not in self.twitch_scope:
-            raise ScopeError(f"<{required_scope}> scope required")
+            raise ScopeError(f"[{required_scope}] scope required")
 
         self.twitch_request(
             "get",
@@ -422,9 +432,9 @@ class Twitch:
         broadcaster_id: str,
         reward_id: str,
         id=None,
-        status: str = None,
+        status: Optional[str] = None,
         sort: str = "OLDEST",
-        after: str = None,
+        after: Optional[str] = None,
         first: int = 20,
     ):
         """
@@ -434,7 +444,7 @@ class Twitch:
 
         required_scope = "channel:read:redemptions"
         if required_scope not in self.twitch_scope:
-            raise ScopeError(f"<{required_scope}> scope required")
+            raise ScopeError(f"[{required_scope}] scope required")
 
         return self.twitch_request(
             "get",
@@ -455,7 +465,7 @@ class Twitch:
         assert isinstance(data, dict), "data should be a dict type"
         required_scope = "channel:manage:redemptions"
         if required_scope not in self.twitch_scope:
-            raise ScopeError(f"<{required_scope}> scope required")
+            raise ScopeError(f"[{required_scope}] scope required")
 
         optional_params = [
             "title",
@@ -497,7 +507,7 @@ class Twitch:
         assert isinstance(data, dict), "data should be a dict type"
         required_scope = "channel:manage:redemptions"
         if required_scope not in self.twitch_scope:
-            raise ScopeError(f"<{required_scope}> scope required")
+            raise ScopeError(f"[{required_scope}] scope required")
 
         required_params = ["status"]
         if required_params[0] not in data.keys():
@@ -583,7 +593,7 @@ class Twitch:
             required_scope = "moderator:read:chat_settings"
             if required_scope not in self.twitch_scope:
                 raise ScopeError(
-                    f"<{required_scope}> scope required if moderator_id is provided"
+                    f"[{required_scope}] scope required if moderator_id is provided"
                 )
 
         return self.twitch_request(
@@ -600,7 +610,7 @@ class Twitch:
         assert isinstance(data, dict), "data should be a dict type"
         required_scope = "moderator:manage:chat_settings"
         if required_scope not in self.twitch_scope:
-            raise ScopeError(f"<{required_scope}> scope required")
+            raise ScopeError(f"[{required_scope}] scope required")
 
         params = [
             "emote_mode",
@@ -631,7 +641,7 @@ class Twitch:
 
         required_scope = "clips:edit"
         if required_scope not in self.twitch_scope:
-            raise ScopeError(f"<{required_scope}> scope required")
+            raise ScopeError(f"[{required_scope}] scope required")
 
         return self.twitch_request(
             "post",
@@ -646,11 +656,11 @@ class Twitch:
         broadcaster_id: str,
         game_id: str,
         id: str,
-        after: str = None,
-        before: str = None,
-        ended_at: str = None,
+        after: Optional[str] = None,
+        before: Optional[str] = None,
+        ended_at: Optional[str] = None,
         first: int = 20,
-        started_at: str = None,
+        started_at: Optional[str] = None,
     ):
         """
         Gets clip information by clip ID (one or more), broadcaster ID (one only),
@@ -1057,7 +1067,7 @@ class Twitch:
 
         required_scope = "channel:read:goals"
         if required_scope not in self.twitch_scope:
-            raise ScopeError(f"<{required_scope}> scope required")
+            raise ScopeError(f"[{required_scope}] scope required")
 
         return self.twitch_request(
             "get", "/goals", oauth_token_required=True, broadcaster_id=broadcaster_id
@@ -1080,7 +1090,7 @@ class Twitch:
 
         required_scope = "channel:read:hype_train"
         if required_scope not in self.twitch_scope:
-            raise ScopeError(f"<{required_scope}> scope required")
+            raise ScopeError(f"[{required_scope}] scope required")
 
         return self.twitch_request(
             "get",
@@ -1101,7 +1111,7 @@ class Twitch:
         assert isinstance(data, dict), "data is a dict type"
         required_scope = "moderation:read"
         if required_scope not in self.twitch_scope:
-            raise ScopeError(f"<{required_scope}> scope required")
+            raise ScopeError(f"[{required_scope}] scope required")
 
         required_params = ["msg_id", "msg_text", "user_id"]
         for i in required_params:
@@ -1131,7 +1141,7 @@ class Twitch:
         assert isinstance(data, dict), "data should be a dict type"
         required_scope = "moderator:manage:automod"
         if required_scope not in self.twitch_scope:
-            raise ScopeError(f"<{required_scope}> scope required")
+            raise ScopeError(f"[{required_scope}] scope required")
 
         required_params = ["user_id", "msg_id", "action"]
         for i in required_params:
@@ -1157,7 +1167,7 @@ class Twitch:
 
         required_scope = "moderator:read:automod_settings"
         if required_scope not in self.twitch_scope:
-            raise ScopeError(f"<{required_scope}> scope required")
+            raise ScopeError(f"[{required_scope}] scope required")
 
         return self.twitch_request(
             "get",
@@ -1179,7 +1189,7 @@ class Twitch:
         assert isinstance(data, dict), "data should be a dict type"
         required_scope = "moderator:manage:automod_settings"
         if required_scope not in self.twitch_scope:
-            raise ScopeError(f"<{required_scope}> scope required")
+            raise ScopeError(f"[{required_scope}] scope required")
 
         optional_params = [
             "aggression",
@@ -1212,17 +1222,9 @@ class Twitch:
         first: str = "20",
         user_id_as_list: bool = False,
     ):
-        "Return all user banned and un-banned events for a channel."
-        # if just requesting for a single user id, user_id is a string,
-        # requesting for multiple users user_id should be an iterable
-        # eg of a hypothetical request here
-        # twitch.get_banned_events("198704263", user_id=[32, 12, 13])
-        # where first parameter is the broadcaster_id and the second is for user_id passed as a list
-        # or an iterable type
-
         required_scope = "moderation:read"
         if required_scope not in self.twitch_scope:
-            raise ScopeError(f"<{required_scope}> scope required")
+            raise ScopeError(f"[{required_scope}] scope required")
 
         if user_id_as_list:
             assert isinstance(user_id, list), "user_id should be a list type"
@@ -1249,7 +1251,7 @@ class Twitch:
 
         required_scope = "moderation:read"
         if required_scope not in self.twitch_scope:
-            raise ScopeError(f"<{required_scope}> scope required")
+            raise ScopeError(f"[{required_scope}] scope required")
 
         if user_id_as_list:
             assert isinstance(user_id, list), "user_id should be a list type"
@@ -1273,7 +1275,7 @@ class Twitch:
         assert isinstance(data, dict), "data should be a dict type"
         required_scope = "moderator:manage:banned_users"
         if required_scope not in self.twitch_scope:
-            raise ScopeError(f"<{required_scope}> scope required")
+            raise ScopeError(f"[{required_scope}] scope required")
 
         required_params = ["data", "reason", "user_id"]
         optional_params = ["duration"]
@@ -1297,7 +1299,7 @@ class Twitch:
 
         required_scope = "moderator:manage:banned_users"
         if required_scope not in self.twitch_scope:
-            raise ScopeError(f"<{required_scope}> scope required")
+            raise ScopeError(f"[{required_scope}] scope required")
 
         return self.twitch_request(
             "delete",
@@ -1323,7 +1325,7 @@ class Twitch:
 
         required_scope = "moderator:read:blocked_terms"
         if required_scope not in self.twitch_scope:
-            raise ScopeError(f"<{required_scope}> scope required")
+            raise ScopeError(f"[{required_scope}] scope required")
 
         return self.twitch_request(
             "get",
@@ -1347,7 +1349,7 @@ class Twitch:
         assert isinstance(data, dict), "data should be a dict type"
         required_scope = "moderator:manage:blocked_terms"
         if required_scope not in self.twitch_scope:
-            raise ScopeError(f"<{required_scope}> scope required")
+            raise ScopeError(f"[{required_scope}] scope required")
 
         required_params = ["text"]
         if required_params[0] not in data.keys():
@@ -1375,7 +1377,7 @@ class Twitch:
 
         required_scope = "moderator:manage:blocked_terms"
         if required_scope not in self.twitch_scope:
-            raise ScopeError(f"<{required_scope}> scope required")
+            raise ScopeError(f"[{required_scope}] scope required")
 
         return self.twitch_request(
             "delete",
@@ -1402,7 +1404,7 @@ class Twitch:
 
         required_scope = "moderation:read"
         if required_scope not in self.twitch_scope:
-            raise ScopeError(f"<{required_scope}> scope required")
+            raise ScopeError(f"[{required_scope}] scope required")
 
         if user_id_as_list:
             assert isinstance(user_id, list), "user_id should be a list type"
@@ -1431,7 +1433,7 @@ class Twitch:
 
         required_scope = "moderation:read"
         if required_scope not in self.twitch_scope:
-            raise ScopeError(f"<{required_scope}> scope required")
+            raise ScopeError(f"[{required_scope}] scope required")
 
         if user_id_as_list:
             assert isinstance(user_id, list), "user_id should be a list type"
@@ -1450,7 +1452,7 @@ class Twitch:
         broadcaster_id: str,
         id: Optional[str] = None,
         after: Optional[str] = None,
-        after: str = "20",
+        first: str = "20",
     ):
         """
         Get information about all polls or specific polls for a Twitch channel.
@@ -1459,9 +1461,9 @@ class Twitch:
 
         required_scope = "channel:read:polls"
         if required_scope not in self.twitch_scope:
-            raise ScopeError(f"<{required_scope}> scope required")
+            raise ScopeError(f"[{required_scope}] scope required")
 
-        return self.request(
+        return self.twitch_request(
             "get",
             "/polls",
             oauth_token_required=True,
@@ -1477,7 +1479,7 @@ class Twitch:
         assert isinstance(data, dict), "data should be a dict type"
         required_scope = "channel:manage:polls"
         if required_scope not in self.twitch_scope:
-            raise ScopeError(f"<{required_scope}> scope required")
+            raise ScopeError(f"[{required_scope}] scope required")
 
         required_params = [
             "broadcaster_id",
@@ -1502,13 +1504,13 @@ class Twitch:
             "post", "/polls", oauth_token_required=True, request_body=request_body
         )
 
-    def end_poll(self, data: Data[str, str]):
+    def end_poll(self, data: Dict[str, str]):
         "End a poll that is currently active."
 
         assert isinstance(data, dict), "data should be a dict type"
         required_scope = "channel:manage:polls"
         if required_scope not in self.twitch_scope:
-            raise ScopeError(f"<{required_scope}> scope required")
+            raise ScopeError(f"[{required_scope}] scope required")
 
         required_params = ["broadcaster_id", "id", "status"]
         for i in required_params:
@@ -1538,7 +1540,7 @@ class Twitch:
 
         required_scope = "channel:read:predictions"
         if required_scope not in self.twitch_scope:
-            raise ScopeError(f"<{required_scope} scope required")
+            raise ScopeError(f"[{required_scope}] scope required")
 
         return self.twitch_request(
             "get",
@@ -1556,7 +1558,7 @@ class Twitch:
         assert isinstance(data, dict), "data should be a dict type"
         required_scope = "channel:manage:predictions"
         if required_scope not in self.twitch_scope:
-            raise ScopeError(f"<{required_scope}> scope required")
+            raise ScopeError(f"[{required_scope}] scope required")
 
         required_params = [
             "broadcaster_id",
@@ -1576,206 +1578,796 @@ class Twitch:
             "post", "/predictions", oauth_token_required=True, request_body=request_body
         )
 
-    def end_prediction(self):
-        "Lock, resolve, or cancel a Channel Points Prediction."
-        pass
+    def end_prediction(self, data: Dict[str, str]):
+        """
+        Lock, resolve, or cancel a Channel Points Prediction.
+        Active Predictions can be updated to be 'locked', 'resolved',
+        or 'canceled'. Locked predictions can be be update to be
+        'resolved' or 'canceled'.
+        """
 
-    def get_channel_stream_schedule(self):
+        assert isinstance(data, dict), "data should be a dict type"
+        required_scope = "channel:manage:prediction"
+        if required_scope not in self.twitch_scope:
+            raise ScopeError(f"[{required_scope}] scope required")
+
+        required_params = ["broadcaster_id", "id", "status"]
+        optional_params = ["winning_outcome_id"]
+        params = required_params + optional_params
+        for i in required_params:
+            if i not in data.keys():
+                raise InvalidRequestException(f"{i} is a required body parameter")
+
+        request_body = {key: value for (key, value) in data.items() if key in params}
+        return self.twitch_request(
+            "patch",
+            "/predictions",
+            oauth_token_required=True,
+            request_body=request_body,
+        )
+
+    def get_channel_stream_schedule(
+        self,
+        broadcaster_id: str,
+        id: Optional[str] = None,
+        start_time: Optional[str] = None,
+        utc_offset: Optional[str] = None,
+        first: int = 20,
+        after: Optional[str] = None,
+    ):
         """
         Gets all scheduled broadcasts or specific scheduled broadcasts from a
-        channel's stream schedule.
-        """
-        pass
+        channel's stream schedule. Scheduled broadcasts are defined as 'stream
+        segments' in the API."""
 
-    def get_channel_icalendar(self):
+        return self.twitch_request(
+            "get",
+            "/schedule",
+            app_or_access_token_required=True,
+            broadcaster_id=broadcaster_id,
+            id=id,
+            start_time=start_time,
+            utc_offset=utc_offset,
+            first=first,
+            after=after,
+        )
+
+    @retry
+    def get_channel_icalendar(self, broadcaster_id: str):
         """
         Gets all scheduled broadcasts ffrom a channel's stream schedule as
         an iCalendar.
         """
-        pass
 
-    def update_channel_stream_schedule(self):
-        "Update the settings for a channel's stream schedule."
-        pass
+        # from twitch's reference documentation, this doesn't require
+        # any form of authorization
+        # therefore this deserves it's own request format
+        # tenacity library for it's own personal retry
+        endpoint = "/schedule/icalendar"
+        url = add_params_to_uri(
+            self.TWITCH_API_BASE_URL + endpoint, [("broadcaster_id", broadcaster_id)]
+        )
+        response = requests.get(url)
+        if response.status_code == 200:
+            return response.text
 
-    def create_channel_stream_schedule_segment(self):
+    def create_channel_stream_schedule_segment(
+        self, broadcaster_id: str, data: Dict[str, Any]
+    ):
         """
         Create a single scheduled broadcast or recurring scheduled broadcast for
         a channel's stream schedule.
         """
-        pass
 
-    def update_channel_stream_schedule_segment(self):
+        assert isinstance(data, dict), "data should be a dict type"
+        required_scope = "channel:manage:scedule"
+        if required_scope not in self.twitch_scope:
+            raise ScopeError(f"[{required_scope}] scope required")
+
+        required_params = ["start_time", "timezone", "is_recurring"]
+        optional_params = ["duration", "category_id", "title"]
+        params = required_params + optional_params
+        for i in required_params:
+            if i not in data.keys():
+                raise InvalidRequestException(f"{i} is a required body parameter")
+
+        request_body = {key: value for (key, value) in data.items() if key in params}
+        return self.twitch_request(
+            "post",
+            "/schedule/segment",
+            oauth_token_required=True,
+            request_body=request_body,
+        )
+
+    def update_channel_stream_schedule_segment(
+        self,
+        broadcaster_id: str,
+        is_vacation_enabled: Optional[bool] = None,
+        vacation_start_time: Optional[str] = None,
+        timezone: Optional[str] = None,
+    ):
         """
         Update a single scheduled broadcast or a recurring scheduled broadcast
         for a channel's stream schedule.
         """
-        pass
 
-    def delete_channel_stream_schedule_segment(self):
+        if is_vacation_enabled is not None:
+            if is_vacation_enabled:
+                if not all([vacation_start_time, vacation_end_time, timezone]):
+                    raise InvalidRequestException(
+                        "If is_vacation_enabled is set to True, vacation_start_time, "
+                        "vacation_end_time and timezone parameters are required."
+                    )
+
+        required_scope = "channel:manage:schedule"
+        if required_scope not in self.twitch_scope:
+            raise ScopeError(f"[{required_scope}] scope required")
+
+        return self.twitch_request(
+            "patch",
+            "/schedule/settings",
+            oauth_token_required=True,
+            broadcaster_id=broadcaster_id,
+            is_vacation_enabled=is_vacation_enabled,
+            vacation_start_time=vacation_start_time,
+            timezone=timezone,
+        )
+
+    def delete_channel_stream_schedule_segment(self, broadcaster_id: str, id: str):
         """
         Delete a single scheduled broadcast or a recurring scheduled broadcast
         for a channel's stream schedule.
         """
-        pass
 
-    def search_catgories(self):
+        required_scope = "channel:manage:scedule"
+        if required_scope not in self.twitch_scope:
+            raise ScopeError(f"[{required_scope}] scope required")
+
+        return self.twitch_request(
+            "delete",
+            "/schedule/segment",
+            oauth_token_required=oauth_token_required,
+            broadcaster_id=broadcaster_id,
+            id=id,
+        )
+
+    def search_catgories(
+        self, query: str, first: int = 20, after: Optional[str] = None
+    ):
         """
         Returns a list of games or categories that match the query via
         name either entirely or partially.
         """
-        pass
 
-    def search_channels(self):
-        """
-        Returns a list of channels that match the query  via channel name or
-        description either entirely or partially.
-        """
-        pass
+        # TODO: query parameter needs to be uri encoded
+        return self.twitch_request(
+            "get",
+            "/search/categories",
+            app_or_oauth_token_required=True,
+            query=query,
+            first=first,
+            after=after,
+        )
 
-    def get_soundtrack_current_track(self):
+    def search_channels(
+        self,
+        query: str,
+        first: int = 20,
+        after: Optional[str] = None,
+        live_only: bool = False,
+    ):
+        """
+        Returns a list of channels (users who have streamed within
+        the past 6 months) that match the query via channel name or
+        description either entirely or partially. Results include both
+        live and offline channels. Online channels will have additional
+        metadata (e.g. started_at, tag_ids)
+        """
+
+        return self.twitch_request(
+            "get",
+            "/search/channels",
+            app_or_oauth_token_required=True,
+            query=query,
+            first=first,
+            after=after,
+            live_only=live_only,
+        )
+
+    def get_soundtrack_current_track(self, broadcaster_id: str):
         "[BETA] Gets the Soundtrack track that the broadcaster is playing."
-        pass
 
-    def get_soundtrack_playlist(self):
+        return self.twitch_request(
+            "get",
+            "/soundtrack/current_track",
+            app_or_oauth_token=True,
+            broadcaster_id=broadcaster_id,
+        )
+
+    def get_soundtrack_playlist(self, id: str):
         "[BETA] Gets a Soundtrack playlist, which includesits list of tracks."
-        pass
 
-    def get_get_soundtrack_playlists(self):
-        "[BETA] Gets a list of Soundtrack playlists."
-        pass
+        return self.twitch_request(
+            "get", "/soundtrack/playlist", app_or_oauth_token_required=True, id=id
+        )
 
-    def get_stream_key(self):
+    def get_soundtrack_playlists(self):
+        """
+        [BETA] Gets a list of Soundtrack playlists.
+
+        The list contains information about the playlists, such
+        as their titles and descriptions. To get a playlist's tracks,
+        call https://dev.twitch.tv/docs/api/reference#get-soundtrack-playlist,
+         and specify the playlist's id.
+        """
+
+        return self.twitch_request(
+            "get",
+            "/soundtrack/playlists",
+            app_or_oauth_token_required=True,
+        )
+
+    def get_stream_key(self, broadcaster_id: str):
         "Gets the channel stream key for a user."
-        pass
 
-    def get_streams(self):
+        required_scope = "channel:read:stream_key"
+        if required_scope not in self.twitch_scope:
+            raise ScopeError(f"[{required_scope}] scope required")
+
+        return self.twitch_request(
+            "get",
+            "/streams/key",
+            oauth_token_required=True,
+            broadcaster_id=broadcaster_id,
+        )
+
+    def get_streams(
+        self,
+        after: Optional[str] = None,
+        before: Optional[str] = None,
+        first: int = 20,
+        game_id: Optional[Union[str, List]] = None,
+        language: Optional[str] = None,
+        user_id: Optional[Union[str, List]] = None,
+        user_login: Optional[Union[str, List]] = None,
+        game_id_as_list: bool = False,
+        user_id_as_list: bool = False,
+        user_login_as_list: bool = False,
+    ):
         """
         Gets information about active streams. Streams are returned sorted by
-        number of current viewers, in descending order.
-        """
-        pass
+        number of current viewers, in descending order. Across multiple pages
+        of results, there may be duplicate or missing stream, as viewers join
+        and leave streams.
 
-    def get_followed_streams(self):
+        The response has a JSON payload with a data field containing an array
+        of stream information elements and a pagination field containing information
+        required to query for more streams.
+        """
+
+        if game_id_as_list:
+            assert isinstance(game_id, list), "game_id should be a list type"
+        if user_id_as_list:
+            assert isinstance(user_id, list), "user_id should be a list type"
+        if user_login_as_list:
+            assert isinstance(user_login, list), "user_login should be a list type"
+
+        return self.twitch_request(
+            "get",
+            "/streams",
+            app_or_oauth_access_token_required - True,
+            game_id=game_id,
+            user_id=user_id,
+            user_login=user_login,
+            language=language,
+            first=first,
+            after=after,
+        )
+
+    def get_followed_streams(
+        self, user_id: str, after: Optional[str] = None, first: int = 20
+    ):
         """
         Gets information about active streams belonging to channels that the
-        authenticated user follows.
+        authenticated user follows. Streams are returned sorted by number of current
+        viewers, in descending order. Across multiple pages of results, there may be
+        duplicate or missing streams, as viewers join and leave streams,
         """
-        pass
+        # twitch reference has first parameter's default value as 100
+        # but pretty sure it's 20
 
-    def create_stream_marker(self):
+        required_scope = "user:read:follows"
+        if required_scope not in self.required_scope:
+            raise ScopeError(f"[{required_scope}] scope required")
+
+        return self.twitch_request(
+            "get",
+            "/streams/followed",
+            oauth_token_required=True,
+            user_id=user_id,
+            after=after,
+            first=first,
+        )
+
+    def create_stream_marker(self, data: Dict[str, str]):
         """
         Creates a marker in the stream of a user specified by user ID. A marker is
-        an arbitrary point in a stream that the broadcaster wants to mark.
-        """
-        pass
+        an arbitrary point in a stream that the broadcaster wants to mark;
+        e.g., to easily return to later. The marker is created at the current
+        timestamp in the live broadcast when the request is processed. Markers
+        can be created by the stream owner or editors. The user creating the marker
+        is identified by a Bearer token.
 
-    def get_stream_markers(self):
+        Markers cannot be created in some cases (an error will occur):
+            * If the specified user's stream is not live
+
+            * If VOD (past broadcast) storage is not enabled for the stream.
+
+            * For premieres (live, first-viewing events that combin uploaded
+              videos with live chat).
+
+            * For reruns (subsequent (not live) streaming of any past broadcast,
+              including past premieres).
+        """
+
+        assert isinstance(data, dict), "data should be a dict type"
+        required_scope = "channel:manage:broadcast"
+        if required_scope not in self.twitch_scope:
+            raise ScopeError(f"[{required_scope}] scope required")
+
+        required_params = ["user_id"]
+        optional_params = ["description"]
+        params = required_params + optional_params
+        if required_params[0] not in data.keys():
+            raise InvalidRequestException(
+                f"{required_params[0]} is a required body parameter"
+            )
+
+        request_body = {key: value for (key, value) in data.items() if key in params}
+        return self.twitch_request(
+            "post",
+            "/streams/markers",
+            oauth_token_required=True,
+            request_body=request_body,
+        )
+
+    def get_stream_markers(
+        self,
+        user_id: Optional[str] = None,
+        video_id: Optional[str] = None,
+        after: Optional[str] = None,
+        before: Optional[str] = None,
+        first: str = "20",
+    ):
         """
         Gets a list of markers for either a specified user's most recent stream or
         a specified VOD/video (stream), ordered by recency. A marker is an
-        arbitrary point in a stream that the broadcaster wants to mark.
+        arbitrary point in a stream that the broadcaster wants to mark;
+        e.g., to easily return to later. The only markers returned are those
+        created by the user identified by the Bearer token.
+
+        The response has a JSON payload with a data field containing an array
+        of marker information elements and a pagination field containing information
+        required to query for more follow information.
         """
-        pass
 
-    def get_broadcaster_subscriptions(self):
+        if all([user_id, video_id]):
+            raise InvalidRequest("Only one of user_id and video_id must be specified")
+
+        required_scope = "user:read:broadcast"
+        if required_scope not in self.twitch_scope:
+            raise ScopeError(f"[{required_scope}] scope required")
+
+        return self.twitch_request(
+            "get",
+            "/streams/markers",
+            oauth_token_required=True,
+            user_id=user_id,
+            video_id=video_id,
+            after=after,
+            before=before,
+            first=first,
+        )
+
+    def get_broadcaster_subscriptions(
+        self,
+        broadcaster_id: str,
+        user_id: Optional[Union[List, str]] = None,
+        after: Optional[str] = None,
+        first: str = 20,
+        user_id_as_list: bool = False,
+    ):
         "Gets all of a broadcaster's subscriptions."
-        pass
 
-    def check_user_subscription(self):
-        "Checks if a specific user is subscribed to a specific channel."
-        pass
+        if user_id_as_list:
+            assert isinstance(user_id, list), "user_id should be a list type"
+        required_scope = "channel:read:subscriptions"
+        if required_scope not in self.required_scope:
+            raise ScopeError(f"[{requied_scope}] scope required")
 
-    def get_all_stream_tags(self):
+        return self.twitch_request(
+            "get",
+            "/subscriptions",
+            oauth_token_required=True,
+            broadcaster_id=broadcaster_id,
+            user_id=user_id,
+            after=after,
+            first=first,
+        )
+
+    def check_user_subscription(self, broadcaster_id: str, user_id: str):
+        """
+        Checks if a specific user (user_id) is subscribed to a specific
+        channel (broadcaster_id).
+        """
+
+        required_scope = "user:read:subscriptions"
+        if required_scope not in self.twitch_scope:
+            raise ScopeError(f"[{required_scope}] scope required")
+
+        return self.twitch_request(
+            "get",
+            "subscriptions/user",
+            oauth_token_required=True,
+            broadcaster_id=broadcaster_id,
+            user_id=user_id,
+        )
+
+    def get_all_stream_tags(
+        self,
+        after: Optional[str] = None,
+        first: int = 20,
+        tag_id: Optional[Union[List, str]] = None,
+        tag_id_as_list: bool = False,
+    ):
         """
         Gets the list of all stream tags that Twitch defines. You can also filter
         the list by one or more tag IDs.
+
+        For an online list of the possible tags, see https://www.twitch.tv/directory/all/tags
         """
-        pass
 
-    def get_stream_tags(self):
+        if all([after, tag_id]):
+            raise InvalidRequestException(
+                "after and tag_id parameters are not used together"
+            )
+
+        return self.twitch_request(
+            "get",
+            "/tags/streams",
+            oauth_token_required=True,
+            after=after,
+            first=first,
+            tag_id=tag_id,
+        )
+
+    def get_stream_tags(self, broadcaster_id: str):
         "Gets the list of stream tags that are set on the specified channel."
-        pass
 
-    def replace_stream_tags(self):
+        return self.twitch_request(
+            "get",
+            "/streams/tags",
+            oauth_token_required=True,
+            broadcaster_id=broadcaster_id,
+        )
+
+    def replace_stream_tags(
+        self, broadcaster_id: str, data: Optional[Dict[str, List]] = None
+    ):
         """
         Applies one or more tags to the specified channel, overwriting any
-        existing tags.
-        """
-        pass
+        existing tags. If the request does not specify tags, all existing tags
+        are removed from the channel.
 
-    def get_channel_teams(self):
+        NOTE: You may not specify automatic tags; the call will fail if you
+        specify automatic tags. Automatic tags are tags that Twitch applies
+        to the channel. For a list of automatic tags, see
+        https://www.twitch.tv/directory/all/tags.
+
+        To get the list programmatically, see
+        https://dev.twitch.tv/docs/api/reference#get-all-streams-tags.
+
+        Tags expire 72 hours after they are applied, unless the channel is live within
+        that time period. If the channel is live within the 72-hour window, the
+        72-hour clock restarts when the channel goes offline. The expiration period
+        is subject to change.
+        """
+
+        data = data if data is None else {}
+        assert isinstance(data, dict), "data should be a dict type"
+        required_scope = "channel:manage:broadcast"
+        if required_scope not in self.twitch_scope:
+            raise ScopeError(f"[{required_scope}] scope required")
+
+        optional_params = ["tag_ids"]
+        request_body = {
+            key: value for (key, value) in data.items() if key in optional_params
+        }
+        return self.twitch_request(
+            "put",
+            "/streams/tags",
+            oauth_token_required=True,
+            request_body=request_body,
+            broadcaster_id=broadcaster_id,
+        )
+
+    def get_channel_teams(self, broadcaster_id: str):
         """
         Retrieves a list of Twitch Teams of which the specified channel/broadcaster
         is a member.
         """
-        pass
 
-    def get_teams(self):
+        return self.twitch_request(
+            "get",
+            "/teams/channel",
+            app_or_oauth_token_required=True,
+            broadcaster_id=broadcaster_id,
+        )
+
+    def get_teams(self, name: Optional[str] = None, id: Optional[str] = None):
         "Gets information for a specific Twitch Team."
-        pass
 
-    def get_users(self):
+        return self.twitch_request(
+            "get",
+            "/helix/teams",
+            app_or_oauth_access_token_required=True,
+            name=name,
+            id=id,
+        )
+
+    def get_users(
+        self,
+        id: Optional[Union[List, str]] = None,
+        login: Optional[Union[List, str]] = None,
+        id_as_list: bool = False,
+        login_as_list: bool = False,
+    ):
         """
         Gets information about one or more specified Twitch user. Users are identified
-        by optional user IDs and/or login name.
+        by optional user IDs and/or login name. If neither a user ID nor a login
+        name is specified, the user is looked up by Bearer token.
+
+        The response has a JSON payload with a data field containing an array
+        of user-information elements.
         """
-        pass
 
-    def update_user(self):
-        "Updates the desceiption of a user specified by a Bearer token."
-        pass
+        if id_as_list:
+            assert isinstance(id, list), "id should be a list type"
+        if login_as_list:
+            assert isinstance(login, list), "login should be a list type"
+        required_scope = "user:read:email"
+        if required_scope not in self.twitch_scope:
+            raise ScopeError(f"[{required_scope}] scope required")
 
-    def get_users_follows(self):
+        return self.twitch_request(
+            "get",
+            "/helix/users",
+            app_or_oauth_access_token_required=True,
+            id=id,
+            login=login,
+        )
+
+    def update_user(self, description: Optional[str] = None):
+        """
+        Updates the desceiption of a user specified by a Bearer token.
+        Note that the description parameter is optional should other
+        updatable parameters become available in the future. If the description
+        parameter is not provided, no update will occur and the current user data
+        is returned.
+        """
+
+        required_scope = "user:edit"
+        if required_scope not in self.twitch_scope:
+            raise ScopeError(f"[{required_scope}] scope required")
+
+        return self.twitch_request(
+            "put", "/users", oauth_token_required=True, description=description
+        )
+
+    def get_users_follows(
+        self,
+        after: Optional[str] = None,
+        first: int = 20,
+        from_id: Optional[str] = None,
+        to_id: Optional[str] = None,
+    ):
         """
         Gets information on follow relationships between two Twitch users.
         Information returned is sorted in order, most recent follow first.
-        """
-        pass
 
-    def get_user_block_list(self):
+        The response has a JSON paylaod with a data field containing an array
+        of follow relationship elements and a pagination field containing
+        information required to query for more follow information.
+        """
+
+        if not any([from_id, to_id]):
+            raise InvalidRequestException(
+                "At minimum, from_id or to_id must be provided for " "query to be valid"
+            )
+
+        return self.twitch_request(
+            "get",
+            "/users/follows",
+            app_or_oauth_token_required=True,
+            after=after,
+            first=first,
+            from_id=from_id,
+            to_id=to_id,
+        )
+
+    def get_user_block_list(
+        self, broadcaster_id: str, first: int = 20, after: Optional[str] = None
+    ):
         """
         Gets a specified user's block list. The list is sorted by when the block
         occurred in descending order (i.e. most recent block first).
         """
-        pass
 
-    def block_user(self):
+        required_scope = "user:read:blocked_user"
+        if required_scope not in self.twitch_scope:
+            raise ScopeError(f"[{required_scope}] scope required")
+
+        return self.twitch_request(
+            "get",
+            "/users/blocks",
+            oauth_token_required=True,
+            broadcaster_id=broadcaster_id,
+            first=first,
+            after=after,
+        )
+
+    def block_user(
+        self,
+        target_user_id: str,
+        source_context: Optional[str] = None,
+        reason: Optional[str] = None,
+    ):
         "Blocks the specified user on behalf of the authenticated user."
-        pass
 
-    def unblock_user(self):
+        required_scope = "user:manage:blocked_user"
+        if required_scope not in self.twitch_scope:
+            raise ScopeError(f"[{required_scope}] scope required")
+
+        return self.twitch_request(
+            "put",
+            "/users/blocks",
+            oauth_token_required=True,
+            target_user_id=target_user_id,
+            source_context=source_context,
+            reason=reason,
+        )
+
+    def unblock_user(self, target_user_id: str):
         "Unblocks the specified user on behalf of the authenticated user."
-        pass
+
+        required_scope = "user:manage:blocked_users"
+        if required_scope not in self.twitch_scope:
+            raise ScopeError("[{required_scope}] scope required")
+
+        return self.twitch_request(
+            "delete",
+            "/users/blocks",
+            oauth_token_required=True,
+            target_user_id=target_user_id,
+        )
 
     def get_user_extensions(self):
         """
         Gets a list of all extensions (both active and inactive) for a
         specified user, identified by a Bearer token.
-        """
-        pass
 
-    def get_user_active_extensions(self):
+        The response has a JSON payload with a data field containing an
+        array of user-information element.
+        """
+
+        required_scope = "user:read:broadcast"
+        if required_scope not in self.twitch_scope:
+            raise ScopeError("[{required_scope}] scope required")
+
+        return self.twitch_request(
+            "get", "/users/extensions/list", oauth_tokne_required=True
+        )
+
+    def get_user_active_extensions(self, user_id: Optional[str] = None):
         """
         Gets information about active extensions installed by a specified user,
         identified by a user ID or Bearer token.
         """
-        pass
 
-    def update_user_extensions(self):
+        return self.twitch_request(
+            "get", "/users/extensions", oauth_token_required=True, user_id=user_id
+        )
+
+    def update_user_extensions(self, data: Dict[str, Any]):
         """
         Updates the activation state, extension ID, and/or version number of
         installed extensions for a specific user, identified by a Bearer token.
+        If you try to activate a given extension under multiple extension types,
+        the last write wins (and there is no guarantee of write order).
         """
-        pass
 
-    def get_videos(self):
-        "Gets video information by one or more video IDs, user ID, or game ID."
-        pass
+        # twitch documentation hasn't yet provided documentation
+        # for request body keys
+        assert isinstance(data, dict), "data should be a dict type"
+        required_scope = "user:edit:broadcast"
+        if required_scope not in self.twitch_request:
+            raise ScopeError(f"[{required_scope}] scope required")
 
-    def delete_videos(self):
+        request_body = data
+
+        return self.twitch_request(
+            "put",
+            "/users/extensions",
+            oauth_token_required=True,
+            request_body=request_body,
+        )
+
+    def get_videos(
+        self,
+        id: Optional[Union[List, str]] = None,
+        user_id: Optional[str] = None,
+        game_id: Optional[str] = None,
+        after: Optional[str] = None,
+        before: Optional[str] = None,
+        first: Optional[str] = None,
+        language: Optional[str] = None,
+        period: Optional[str] = None,
+        sort: Optional[str] = None,
+        type: Optional = None,
+        id_as_list: bool = False,
+    ):
+        """
+        Gets video information by one or more video IDs, user ID, or game ID.
+        For lookup by user or game, several filters available that can be
+        specified as query parameters.
+        """
+
+        if not any([id, user_id, game_id]):
+            raise InvalidRequestException(
+                "Each request must specify one or more video id's, "
+                "one user_id, or one game_id"
+            )
+
+        if id is not None:
+            if id_as_list:
+                assert isinstance(id, list), "id should be a list type"
+            if any([after, before, first, language, period, sort, type]):
+                raise InvalidRequestException(
+                    "Optional query parameters can be used if the request "
+                    "specifies a user_id or game_id, not video id."
+                )
+
+        return self.twitch_request(
+            "get",
+            "/videos",
+            app_or_oauth_token_required=True,
+            id=id,
+            user_id=user_id,
+            game_id=game_id,
+            after=after,
+            before=before,
+            first=first,
+            language=language,
+            period=period,
+            sort=sort,
+            type=type,
+        )
+
+    def delete_videos(self, id: str):
         """
         Deletes one or more videos. Videos are past broadcasts, Highlights
         or uploads.
+
+        Invalid Video IDs will be ignored (i.e. IDs proveided that do not
+        have a video associated with it). If the OAuth user token does not
+        have permission to delete even one of the valid Video IDs, no videos
+        will be deleted and the response will return a 401.
         """
-        pass
+
+        required_scope = "channel:manage:videos"
+        if required_scope not in self.twitch_scope:
+            raise ScopeError("[{required_scope}] scope required")
+
+        return self.twitch_request(
+            "delete", "/videos", oauth_token_required=True, id=id
+        )

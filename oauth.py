@@ -221,9 +221,9 @@ class ClientCredentials:
 
 class AuthorizationCodeFlow:
     def __init__(self):
-        pass
+        raise NotImplementedError
 
 
 class OIDCAuthorizationCodeFlow:
     def __init__(self):
-        pass
+        raise NotImplementedError

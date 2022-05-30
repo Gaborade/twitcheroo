@@ -5,3 +5,4 @@ oidc.py
 .copy_acccess_token.txt
 .client_credentials.pickle
 example.py
+tests.py
