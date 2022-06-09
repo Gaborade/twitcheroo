@@ -43,6 +43,7 @@ class Twitch:
         ],
         max_retries: int = 3,
         timeout: float = 10.0,
+        backoff_time: int = 2
     ):
         if not any(
             isinstance(auth, auth_object) for auth_object in Twitch.AUTH_OBJECTS
@@ -57,6 +58,7 @@ class Twitch:
         self.twitch_session, self.twitch_scope = self.auth()
         self.max_retries = int(max_retries)
         self.timeout = float(timeout)
+        self.backoff_time = backoff_time
 
     @staticmethod
     def _apply_exponential_backoff(backoff: SECONDS) -> None:
@@ -71,12 +73,12 @@ class Twitch:
         self,
         method: str,
         endpoint: str,
-        request_body=None,
-        jwt_required=False,
-        oauth_token_required=False,
-        app_access_token_required=False,
-        app_or_oauth_token_required=False,
-        pagination=False,
+        request_body: Optional[Dict[str, Any]] = None,
+        jwt_required: bool = False,
+        oauth_token_required: bool = False,
+        app_access_token_required: bool = False,
+        app_or_oauth_token_required: bool = False,
+        pagination: bool = False,
         **query_parameters,
     ):
         # reminder to always set one of these keyword parameters to True
@@ -144,7 +146,7 @@ class Twitch:
             url = self.TWITCH_API_BASE_URL + endpoint
 
         retries = self.max_retries
-        delay_seconds = 1.2
+        delay_seconds = self.backoff_time
 
         while retries >= 0:
             try:
