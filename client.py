@@ -1916,7 +1916,7 @@ class Twitch:
             user_login=user_login,
             language=language,
             first=first,
-            before=before
+            before=before,
             after=after,
         )
 
