@@ -26,7 +26,7 @@ def test_double_whitespace_in_func_docstring(cls):
                         if not line == "" and not line.isspace():
                             double_whitespace_check(cls, func, line, lineno)
     print("\u533A" * 40)
-    print(f"No double whitespace found in {cls.__name__} class docstrings")
+    print(f"No double whitespace found in {cls.__name__} class docstrings\n")
 
 
 def double_whitespace_check(cls, func, line, lineno=1):

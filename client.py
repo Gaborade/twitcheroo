@@ -1,10 +1,31 @@
 import sys
+import time
 import requests
+import random
 from tenacity import retry
 from typing import Optional, Dict, Any, Union, List
 from oauth import ClientCredentials, AuthorizationCodeFlow, OIDCAuthorizationCodeFlow
-from exceptions import TwitchAuthException, InvalidRequestException
 from authlib.common.urls import add_params_to_uri
+from exceptions import (
+    TwitchAuthException,
+    InvalidRequestException,
+    BadRequestError,
+    ScopeError,
+    TwitchInternalServerError,
+    TooManyRequestsError,
+    UnAuthorizedError,
+    ForbiddenError,
+    NetworkConnectionError,
+)
+
+
+SECONDS = int
+http_errors = {
+    400: BadRequestError,
+    401: UnAuthorizedError,
+    403: ForbiddenError,
+    429: TooManyRequestsError,
+}
 
 
 class Twitch:
@@ -15,7 +36,14 @@ class Twitch:
         OIDCAuthorizationCodeFlow,
     ]
 
-    def __init__(self, auth, max_retries=3, timeout=None):
+    def __init__(
+        self,
+        auth: Union[
+            ClientCredentials, AuthorizationCodeFlow, OIDCAuthorizationCodeFlow
+        ],
+        max_retries: int = 3,
+        timeout: float = 10.0,
+    ):
         if not any(
             isinstance(auth, auth_object) for auth_object in Twitch.AUTH_OBJECTS
         ):
@@ -25,13 +53,19 @@ class Twitch:
                 authentication classes"""
             )
 
-        self.twitch_session, self.twitch_scope = auth()
-        self.max_retries = max_retries
-        self.timeout = timeout
+        self.auth = auth
+        self.twitch_session, self.twitch_scope = self.auth()
+        self.max_retries = int(max_retries)
+        self.timeout = float(timeout)
 
     @staticmethod
-    def _apply_exponential_backoff():
-        raise NotImplementedError
+    def _apply_exponential_backoff(backoff: SECONDS) -> None:
+        # random_milliseconds needed to add random jitter
+        # 1000 milliseconds make a second
+        # need to convert milliseconds to seconds for time.sleep
+        random_milliseconds = random.randrange(0, 1000) / 1000
+        backoff += random_milliseconds
+        time.sleep(backoff)
 
     def twitch_request(
         self,
@@ -62,33 +96,37 @@ class Twitch:
         ), assert_msg
 
         if app_access_token_required:
-            if not isinstance(self.twitch_session, ClientCredentials):
+            if not isinstance(self.auth, ClientCredentials):
                 raise TwitchAuthException(
                     f"{self.TWITCH_API_BASE_URL}{endpoint} endpoint "
                     "requires an app access token"
                 )
+
         if oauth_token_required:
-            if not isinstance(self.twitch_session, AuthorizationCodeFlow):
+            if not isinstance(self.auth, AuthorizationCodeFlow):
                 raise TwitchAuthException(
                     f"{self.TWITCH_API_BASE_URL}{endpoint} endpoint "
                     "requires an oauth token"
                 )
+
         if app_or_oauth_token_required:
-            if not isinstance(
-                self.twitch_session, ClientCredentials
-            ) and not isinstance(self.session, AuthorizationCodeFlow):
+            if not isinstance(self.auth, ClientCredentials) and not isinstance(
+                self.auth, AuthorizationCodeFlow
+            ):
                 raise TwitchAuthException(
                     f"{self.TWITCH_API_BASE_URL}{endpoint} endpoint "
                     "requires an app access token or oauth token"
                 )
+
         if jwt_required:
-            if not isinstance(self.twitch_session, OIDCAuthorizationCodeFlow):
+            if not isinstance(self.auth, OIDCAuthorizationCodeFlow):
                 raise TwitchAuthException(
                     f"{self.TWITCH_API_BASE_URL}{endpoint} endpoint requires a jwt token"
                 )
 
         request_body = request_body if request_body is not None else {}
         query_parameters = query_parameters if query_parameters else {}
+
         if query_parameters:
             fragments = []
             for k, v in query_parameters.copy().items():
@@ -106,41 +144,58 @@ class Twitch:
             url = self.TWITCH_API_BASE_URL + endpoint
 
         retries = self.max_retries
-        # TODO: there should be backoffs and random jitters
-        while retries > 0:
+        delay_seconds = 1.2
+
+        while retries >= 0:
             try:
                 if request_body:
-                    response = self.twitch_session.request(
-                        method, url, body=request_body
-                    )
+                    # request session needs to be closed so it doesn't hang
+                    # hanging requests don't allow other retries to occur
+                    # hence the context manager
+                    with self.twitch_session as session:
+                        response = session.request(
+                            method, url, body=request_body, timeout=self.timeout
+                        )
                 else:
-                    response = self.twitch_session.request(method, url)
-            except Exception:
-                retries -= 1
-                # this bit is overengineered. can just do Exception as e
-                # then raise e instead of using sys.exc_info, achieves the same thing
-                # only thing is, should i add tracebacks?
-                # only valid reason for maybe using sys.exc_info will be to raise different error
-                # messages depending on the type of error say HTTP or URLError as shown below
-                recent_exception = sys.exc_info()
-                if retries == 0:
-                    exception_class, exception_message = recent_exception[:2]
-                    if exception_class == HTTPError:
-                        # raise my own personal error here but pass now
-                        pass
-                    elif exception_class == URLError:
-                        pass
-                    else:
-                        raise exception_class(exception_message)
+                    with self.twitch_session as session:
+                        response = session.request(method, url, timeout=self.timeout)
+
+                if response.status_code == 500:
+                    raise TwitchInternalServerError
+
+            except (
+                requests.exceptions.ConnectionError,
+                requests.exceptions.ReadTimeout,
+                TwitchInternalServerError,
+            ) as e:
+
+                if retries != 0:
+                    self._apply_exponential_backoff(delay_seconds)
+                    # exponentially increase delay seconds
+                    delay_seconds **= 2
+                    retries -= 1
+
+                elif retries == 0:
+                    if isinstance(e, TwitchInternalServerError):
+                        raise TwitchInternalServerError("status_code=500")
+
+                    if isinstance(e, requests.exceptions.ConnectionError):
+                        exc_msg = sys.exc_info()[1]
+                        exc_msg = str(exc_msg).replace(
+                            "retries", "retries={}".format(self.max_retries)
+                        )
+                        raise NetworkConnectionError(exc_msg)
+                    raise e
+
             else:
                 if response.status_code == 200:
                     return response.json()
-                elif response.status_code == 400:
-                    raise BadRequest(response.reason)
-                elif response.status_code == 500:
-                    raise TwitchServerError(response.reason)
-                elif response.status_code == 401:
-                    raise UnAuthorizedException(response.reason)
+                elif response.status_code == 204:
+                    return response.status_code
+                else:
+                    global http_errors
+                    if response.status_code in http_errors:
+                        raise http_errors[response.status_code](response.json())
 
     def start_commercial(self, data):
         "Start a commerical on a specified channel"
@@ -1982,7 +2037,7 @@ class Twitch:
         if user_id_as_list:
             assert isinstance(user_id, list), "user_id should be a list type"
         required_scope = "channel:read:subscriptions"
-        if required_scope not in self.required_scope:
+        if required_scope not in self.twitch_scope:
             raise ScopeError(f"[{requied_scope}] scope required")
 
         return self.twitch_request(

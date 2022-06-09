@@ -54,11 +54,11 @@ class ClientCredentials:
                 and twitch_scope[0] not in APIv5_SCOPES
             ):
                 raise ValueError(
-                    f"Scope provided <{twitch_scope[0]}> not supported by Twitch"
+                    f"Scope provided [{twitch_scope[0]}] not supported by Twitch"
                 )
             if twitch_scope[0] in APIv5_SCOPES:
                 warnings.warn(
-                    f"""Scope provided <{twitch_scope[0]}> is for Twitch 
+                    f"""Scope provided [{twitch_scope[0]}] is for Twitch 
                     legacy APIv5, recommended to switch to new API version """
                 )
             return
@@ -66,7 +66,7 @@ class ClientCredentials:
             scope_in_apiv5 = []
             for x in twitch_scope:
                 if x not in SUPPORTED_SCOPES and x not in APIv5_SCOPES:
-                    raise ValueError(f"Scope provided <{x}> not supported by Twitch")
+                    raise ValueError(f"Scope provided [{x}] not supported by Twitch")
                 if x in APIv5_SCOPES:
                     scope_in_apiv5.append(x)
             if scope_in_apiv5:
@@ -102,13 +102,14 @@ class ClientCredentials:
             self.get_access_token(check_cache=False)
         if self.is_token_expired():
             self.get_access_token(check_cache=False)
+        self.session.headers["Client-Id"] = self.__client_id
         return self.session, self.scope.split()
 
     def _generate_twitch_token_url(self):
 
         """
-        Twitch requires adding the cilent_id and client_url when
-        sending POST request to obtain access tokens
+        Twitch requires adding the client_id and client_url when
+        sending POST requests to obtain access tokens
         during the usage of the client credentials OAuth flow
         """
 
@@ -191,7 +192,6 @@ class ClientCredentials:
             pickle.dump(
                 self.access_token, client_credentials_file, pickle.HIGHEST_PROTOCOL
             )
-            print("token stored in cache")
 
     def read_access_token_from_file(self):
         try:
