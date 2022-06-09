@@ -1910,12 +1910,13 @@ class Twitch:
         return self.twitch_request(
             "get",
             "/streams",
-            app_or_oauth_access_token_required - True,
+            app_or_oauth_access_token_required=True,
             game_id=game_id,
             user_id=user_id,
             user_login=user_login,
             language=language,
             first=first,
+            before=before
             after=after,
         )
 
