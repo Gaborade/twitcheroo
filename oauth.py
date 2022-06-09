@@ -182,7 +182,7 @@ class ClientCredentials:
 
     def is_token_expired(self):
         "App access tokens expire after 60 days"
-        
+
         if time.time() > self.access_token["expires_at"]:
             return True
         return False
