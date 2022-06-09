@@ -42,8 +42,8 @@ class Twitch:
             ClientCredentials, AuthorizationCodeFlow, OIDCAuthorizationCodeFlow
         ],
         max_retries: int = 3,
-        timeout: float = 10.0,
-        backoff_time: int = 2
+        timeout: float = 5.0,
+        backoff_time: int = 2,
     ):
         if not any(
             isinstance(auth, auth_object) for auth_object in Twitch.AUTH_OBJECTS

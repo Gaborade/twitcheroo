@@ -1,6 +1,7 @@
 from authlib.integrations.requests_client import OAuth2Session
 from authlib.common.urls import add_params_to_uri
 from constants import SUPPORTED_SCOPES, APIv5_SCOPES
+import requests
 from typing import List, Optional
 import warnings
 import os
@@ -37,12 +38,14 @@ class ClientCredentials:
 
         self.grant_type = grant_type
         self.access_token = None
+
         if len(self.scope) > 0:
             self.session = OAuth2Session(
                 self.__client_id, self.__client_secret, scope=self.scope
             )
         else:
             self.session = OAuth2Session(self.__client_id, self.__client_secret)
+
         self.access_token_file = ".client_credentials.pickle"
         self.next_validate_token_time = 0
 
@@ -56,6 +59,7 @@ class ClientCredentials:
                 raise ValueError(
                     f"Scope provided [{twitch_scope[0]}] not supported by Twitch"
                 )
+
             if twitch_scope[0] in APIv5_SCOPES:
                 warnings.warn(
                     f"""Scope provided [{twitch_scope[0]}] is for Twitch 
@@ -64,11 +68,14 @@ class ClientCredentials:
             return
         else:
             scope_in_apiv5 = []
+
             for x in twitch_scope:
                 if x not in SUPPORTED_SCOPES and x not in APIv5_SCOPES:
                     raise ValueError(f"Scope provided [{x}] not supported by Twitch")
+
                 if x in APIv5_SCOPES:
                     scope_in_apiv5.append(x)
+
             if scope_in_apiv5:
                 warnings.warn(
                     f"""Scope/s provided {scope_in_apiv5} are for Twitch 
@@ -138,10 +145,12 @@ class ClientCredentials:
         # self.read_access_token() is called twice, needs changing
         if check_cache and self.read_access_token_from_file() is not None:
             self.access_token = self.read_access_token_from_file()
+
         else:
             twitch_token_url = self._generate_twitch_token_url()
             self.access_token = self.session.fetch_token(twitch_token_url)
             self.save_access_token_to_file()
+
         if len(self.scope) > 0:
             self.session = OAuth2Session(
                 self.__client_id,
@@ -168,15 +177,28 @@ class ClientCredentials:
         twitch_validate_token_url = self.TWITCH_OAUTH_TOKEN_URL.replace(
             "token", "validate"
         )
+
         if time.time() > self.next_validate_token_time:
-            response = self.session.get(twitch_validate_token_url)
-            if response.status_code == 200:
-                # the next validation will be in the next hour ie 3600 seconds later
-                self.next_validate_token_time = time.time() + 3600
-                return True
-            elif response.status_code == 401:
-                self.next_validate_token_time = 0
-                return False
+            try:
+                with self.session as session:
+                    response = session.get(twitch_validate_token_url, timeout=5.0)
+
+                if response.status_code == 200:
+                    # the next validation will be in the next hour
+                    # ie 3600 seconds later
+                    self.next_validate_token_time = time.time() + 3600
+                    return True
+
+                elif response.status_code == 401:
+                    self.next_validate_token_time = 0
+                    return False
+
+            except (
+                requests.exceptions.ConnectionError,
+                requests.exceptions.ReadTimeout,
+            ) as e:
+                raise e
+
         else:
             return True
 
@@ -197,14 +219,17 @@ class ClientCredentials:
         try:
             with open(self.access_token_file, "rb") as client_credentials_file:
                 access_token = pickle.load(client_credentials_file)
+
         except FileNotFoundError:
             return None
+
         else:
             # check for the unlikely event that pickle data gets corrupted
             # pickle is insecure so it's quite important
             # but then again not entirely necessary
             if not isinstance(access_token, dict):
                 return None
+
             token_keys = [
                 "token",
                 "expires_in",
@@ -213,6 +238,7 @@ class ClientCredentials:
                 "bearer",
                 "expires_at",
             ]
+
             for key, value in access_token.items():
                 if key not in token_keys:
                     return None
