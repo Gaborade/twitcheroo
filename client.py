@@ -83,6 +83,7 @@ class Twitch:
     ):
         # reminder to always set one of these keyword parameters to True
         # for every Twitch endpoint method created.
+        # TODO: Activated only when debugging is set to True
         assert_msg = (
             "One of oauth_token_required, app_access_token_required or "
             "app_or_oauth_token_required kwargs should be set to True "
@@ -2371,7 +2372,7 @@ class Twitch:
         language: Optional[str] = None,
         period: Optional[str] = None,
         sort: Optional[str] = None,
-        type: Optional = None,
+        type: Optional[str] = None,
         id_as_list: bool = False,
     ):
         """
