@@ -3,6 +3,9 @@ Twitcheroo, a Python client library for using the Twitch API.
 
 ### FEATURES
 
+- [x] Authentication 
+    - [x] OAuth Client Credentials Flow
+    - [ ] OAuth Authorization Code Grant Flow
 - [x] Timeouts
 - [x] Retries and Backoffs
 - [x] Support for all Twitch API endpoints
