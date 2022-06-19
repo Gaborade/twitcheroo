@@ -183,21 +183,22 @@ class ClientCredentials:
                 with self.session as session:
                     response = session.get(twitch_validate_token_url, timeout=5.0)
 
+            except (
+                requests.exceptions.ConnectionError,
+                requests.exceptions.ReadTimeout,
+            ) as e:
+                raise e
+
+            else:
                 if response.status_code == 200:
                     # the next validation will be in the next hour
-                    # ie 3600 seconds later
+                    # i.e. 3600 seconds later
                     self.next_validate_token_time = time.time() + 3600
                     return True
 
                 elif response.status_code == 401:
                     self.next_validate_token_time = 0
                     return False
-
-            except (
-                requests.exceptions.ConnectionError,
-                requests.exceptions.ReadTimeout,
-            ) as e:
-                raise e
 
         else:
             return True

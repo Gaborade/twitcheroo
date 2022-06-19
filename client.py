@@ -49,7 +49,7 @@ class Twitch:
             isinstance(auth, auth_object) for auth_object in Twitch.AUTH_OBJECTS
         ):
             raise TwitchAuthException(
-                f"""Authentication class <{auth.__class__.__name__}> not supported by API.
+                f"""Authentication class <{auth.__class__.__name__}> not supported by Twitcheroo.
                  Use ClientCredentials, AuthorizationCodeFlow or OIDCAuthorizationCodeFlow 
                 authentication classes"""
             )
@@ -1705,9 +1705,23 @@ class Twitch:
         url = add_params_to_uri(
             self.TWITCH_API_BASE_URL + endpoint, [("broadcaster_id", broadcaster_id)]
         )
-        response = requests.get(url)
-        if response.status_code == 200:
-            return response.text
+
+        try:
+            response = requests.get(url, timeout=self.timeout)
+
+        except (
+            requests.exceptions.ReadTimeout,
+            requests.excptions.ConnectionError,
+        ) as e:
+            raise e
+
+        else:
+            if response.status_code == 200:
+                return response.text
+            else:
+                global http_errors
+                if response.status_code == 400:
+                    raise http_errors[response.status_code](response.json())
 
     def create_channel_stream_schedule_segment(
         self, broadcaster_id: str, data: Dict[str, Any]
